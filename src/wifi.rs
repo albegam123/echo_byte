@@ -108,7 +108,13 @@ impl<'d> WifiManager<'d> {
     pub fn scan_networks(&mut self) -> Result<Vec<ScannedNetwork>> {
         self.stop_best_effort();
         self.wifi
-            .set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
+            .set_configuration(&Configuration::Client(ClientConfiguration {
+                // Scanning does not authenticate. Explicitly allowing open
+                // networks also avoids the driver's misleading empty-password
+                // warning while this temporary STA configuration is active.
+                auth_method: AuthMethod::None,
+                ..Default::default()
+            }))?;
         self.wifi.start()?;
 
         let scan_result = self.wifi.scan();
