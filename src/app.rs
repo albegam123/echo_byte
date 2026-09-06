@@ -2,16 +2,27 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::hal::gpio::PinDriver;
+use esp_idf_svc::hal::gpio::Pull;
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 
 use crate::config::{ONLINE_POLL_SECS, ONLINE_RECONNECT_ATTEMPTS, STA_CONNECT_ATTEMPTS};
 use crate::provisioning::{self, Credentials};
 use crate::storage::CredentialStore;
+use crate::wake::WakeEventReceiver;
 use crate::wifi::{ScannedNetwork, WifiManager};
 
 pub async fn run() -> Result<()> {
+    if let Err(error) = crate::audio::run_startup_self_test() {
+        log::error!("open audio stack startup self-test failed: {error:#}");
+    }
+
     let peripherals = Peripherals::take().context("take ESP32-S3 peripherals")?;
+    let boot_button = PinDriver::input(peripherals.pins.gpio0, Pull::Up)
+        .context("configure BOOT button on GPIO0")?;
+    let (wake_sender, wake_receiver) = crate::wake::event_channel();
+    let _button_task = crate::wake::ButtonWakeTask::start(boot_button, wake_sender.clone())?;
     let sys_loop = EspSystemEventLoop::take().context("take ESP system event loop")?;
     let nvs = EspDefaultNvsPartition::take().context("initialize default NVS partition")?;
 
@@ -32,7 +43,7 @@ pub async fn run() -> Result<()> {
                 "Wi-Fi profile {:?} moved to the front of the MRU list",
                 credentials.ssid()
             );
-            monitor_connection(&mut wifi, &credentials).await?;
+            monitor_connection(&mut wifi, &credentials, &wake_receiver).await?;
             continue;
         }
 
@@ -48,7 +59,7 @@ pub async fn run() -> Result<()> {
                         credentials.ssid(),
                         profiles.len()
                     );
-                    monitor_connection(&mut wifi, &credentials).await?;
+                    monitor_connection(&mut wifi, &credentials, &wake_receiver).await?;
                     break;
                 }
                 Err(error) => {
@@ -180,9 +191,14 @@ fn connect_with_retries(wifi: &mut WifiManager<'_>, credentials: &Credentials) -
 
 /// Monitors the active profile until its direct reconnect attempts are
 /// exhausted. The caller then rescans all known profiles for location failover.
-async fn monitor_connection(wifi: &mut WifiManager<'_>, credentials: &Credentials) -> Result<()> {
+async fn monitor_connection(
+    wifi: &mut WifiManager<'_>,
+    credentials: &Credentials,
+    wake_receiver: &WakeEventReceiver,
+) -> Result<()> {
     loop {
         std::thread::sleep(Duration::from_secs(ONLINE_POLL_SECS));
+        drain_wake_events(wake_receiver);
         if wifi.is_online().unwrap_or(false) {
             continue;
         }
@@ -207,5 +223,15 @@ async fn monitor_connection(wifi: &mut WifiManager<'_>, credentials: &Credential
                 }
             }
         }
+    }
+}
+
+fn drain_wake_events(receiver: &WakeEventReceiver) {
+    while let Ok(event) = receiver.try_recv() {
+        log::info!(
+            "wake event: source={:?}, monotonic_us={} (voice session starts when I2S is installed)",
+            event.source,
+            event.monotonic_us
+        );
     }
 }

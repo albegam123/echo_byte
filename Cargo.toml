@@ -38,11 +38,35 @@ esp_idf_components = [
     "pthread",
     "freertos",
     "driver",
+    "echo_audio_dsp",
+    "echo_wakeword",
+    "espressif__esp-tflite-micro",
+    "espressif__esp-nn",
+    "esphome__esp-micro-speech-features",
     # esp-idf-svc 0.52's std IO module currently expects these bindings.
     "spiffs",
     "fatfs",
     "wear_levelling",
 ]
+
+[[package.metadata.esp-idf-sys.extra_components]]
+component_dirs = ["components/echo_audio_dsp"]
+bindings_header = "components/echo_audio_dsp/include/echo_audio_dsp.h"
+bindings_module = "echo_audio_dsp"
+
+[[package.metadata.esp-idf-sys.extra_components]]
+component_dirs = ["components/echo_wakeword"]
+bindings_header = "components/echo_wakeword/include/echo_wakeword.h"
+bindings_module = "echo_wakeword"
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp-tflite-micro", version = "=1.3.7" }
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp-nn", version = "=1.1.2" }
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "esphome/esp-micro-speech-features", version = "=1.2.3" }
 
 [profile.dev]
 debug = true

@@ -1,6 +1,7 @@
 # echo_byte
 
-ESP32-S3-N32R16 无屏智能语音终端。当前第一阶段实现 Wi-Fi 自动连接和 BLE/AP 双轨配网；音频将在第二阶段加入。
+ESP32-S3-N32R16 无屏智能语音终端。第一阶段已实现 Wi-Fi 自动连接和
+BLE/AP 双轨配网；第二阶段正在接入完全开源的本地唤醒和语音前处理。
 
 完整阶段安排见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 
@@ -69,6 +70,22 @@ sudo usermod -aG dialout "$USER"
 当前配网固件使用 ESP-IDF 的 large single-app 分区表。仓库内的 `partitions.csv`
 预留了第二阶段需要的 OTA、WakeNet 模型和数据区域，接入模型时再启用，避免当前
 Rust 原生构建器对自定义 CSV 相对路径的处理差异影响第一阶段烧录。
+
+## 开源语音前端
+
+- 3A 使用 Xiph SpeexDSP 的 BSD-3-Clause 官方源码固定快照：16 kHz、10 ms、
+  单麦克风、双声道扬声器参考，包含 AEC、NS、AGC 和 VAD。浮点构建是刻意选择，
+  因为上游 AGC 不存在于定点预处理器中。
+- 唤醒使用 microWakeWord 模型格式、乐鑫 TensorFlow Lite Micro/ESP-NN 和
+  Apache-2.0 的 micro-speech 特征生成器。首个板测模型是 `Hey Jarvis` v2；
+  产品版会替换为专门训练的 `EchoByte` 模型。
+- 两层都只在初始化时分配内存。每次音频处理不扩容、不加锁；Rust 端用唯一的
+  `&mut` 所有权把各自的 C/C++ 状态限制在单一音频任务中。
+- BOOT 键（GPIO0）经过 30 ms 消抖后，与语音检测统一产生 `WakeEvent`。
+  开发板另一个标成 RST/EN 的按键是硬件复位，不是可供业务读取的 GPIO。
+
+算法来源、参数与硬件验收项见
+[`docs/OPEN_SOURCE_AUDIO.md`](docs/OPEN_SOURCE_AUDIO.md)。
 
 ## 安全说明
 

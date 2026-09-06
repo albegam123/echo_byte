@@ -1,7 +1,9 @@
 mod app;
+mod audio;
 mod config;
 mod provisioning;
 mod storage;
+mod wake;
 mod wifi;
 
 fn main() -> anyhow::Result<()> {
