@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -22,6 +23,16 @@ pub struct ScannedNetwork {
     rssi: i8,
     channel: u8,
     secure: bool,
+}
+
+impl ScannedNetwork {
+    pub fn ssid(&self) -> &str {
+        &self.ssid
+    }
+
+    pub fn rssi(&self) -> i8 {
+        self.rssi
+    }
 }
 
 pub struct WifiManager<'d> {
@@ -160,8 +171,10 @@ impl<'d> WifiManager<'d> {
             .collect();
 
         networks.sort_by_key(|network| core::cmp::Reverse(network.rssi));
-        networks.dedup_by(|a, b| a.ssid == b.ssid);
-        networks.truncate(24);
+        // APs using the same SSID are not necessarily adjacent after an RSSI
+        // sort. Retain the strongest one while preserving signal order.
+        let mut seen = HashSet::new();
+        networks.retain(|network| seen.insert(network.ssid.clone()));
         Ok(networks)
     }
 
