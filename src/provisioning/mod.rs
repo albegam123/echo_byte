@@ -91,7 +91,8 @@ pub async fn obtain_credentials(wifi: &mut WifiManager<'_>) -> Result<Credential
     // the coordinator switches the Wi-Fi driver back to STA mode.
     let portal = CaptivePortal::start(sender.clone(), winner_chosen.clone(), &networks)
         .context("start captive portal services")?;
-    let ble = BleProvisioner::start(sender, winner_chosen).context("start BLE provisioning")?;
+    let ble = BleProvisioner::start(sender, winner_chosen, &networks)
+        .context("start BLE provisioning")?;
 
     log::info!(
         "provisioning ready: AP={} portal={} BLE={}",

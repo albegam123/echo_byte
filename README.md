@@ -29,9 +29,25 @@ BLE 外设或另一台设备读取，因此首次添加每个热点仍需用户�
 - Service: `7b3e0001-6d6f-4d65-9f20-6563686f6279`
 - Credentials characteristic: `7b3e0002-6d6f-4d65-9f20-6563686f6279`
 - Info characteristic: `7b3e0003-6d6f-4d65-9f20-6563686f6279`
+- Networks characteristic: `7b3e0004-6d6f-4d65-9f20-6563686f6279`
 - 写入 UTF-8 JSON：`{"ssid":"MyWifi","password":"secret123"}`
 
-浏览器客户端位于 `web/ble_provision.html`。Web Bluetooth 要求 HTTPS 或 localhost，且浏览器本身需要支持 Web Bluetooth。
+Networks 特征采用分页协议：客户端先写入一个 `u8` 索引，再读取对应网络的 JSON；
+索引超过扫描结果末尾时读取到 `null`。这避免热点较多时超过单个 GATT 属性限制。
+
+浏览器客户端位于 `web/ble_provision.html`。网页连接 BLE 后会分页读取 ESP32 的
+Wi-Fi 扫描结果并生成下拉列表，也保留隐藏网络的手动输入入口。Web Bluetooth
+要求 HTTPS 或 localhost，且浏览器本身需要支持 Web Bluetooth。
+
+本地已有 `~/scripts/cert/192.168.3.2+3.pem` 证书时，可在项目根目录启动：
+
+```bash
+python3 scripts/serve_ble_https.py
+```
+
+同一局域网内的 Android 手机使用 Chrome/Edge 打开
+`https://192.168.3.2:8443/`。证书由本地 mkcert CA 签发，手机必须先信任对应的
+`rootCA.pem`，否则页面不属于可信安全上下文，浏览器会禁用 Web Bluetooth。
 
 ## 构建和烧录
 

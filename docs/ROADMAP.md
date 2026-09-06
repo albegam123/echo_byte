@@ -7,6 +7,7 @@
   全部失败才进入配网。
 - 新凭据验证后提交、三次初连重试和在线断线重连。
 - BLE NimBLE GATT 配网与 AP Captive Portal 同时运行。
+- Web Bluetooth HTTPS 页面通过分页 GATT 特征读取 ESP32 扫描结果并生成热点下拉列表。
 - 通配 DNS、常见系统联网探测路径和 Wi-Fi 扫描页面。
 - 首个合法提交胜出；关闭 BLE、HTTP、DNS、AP 后切换纯 STA。
 - 板端验收：Android/iOS/Windows Portal、WebBLE、错误密码恢复、断电重连。

@@ -3,44 +3,212 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>EchoByte BLE 配网</title>
+  <meta name="color-scheme" content="dark">
+  <title>EchoByte Web Bluetooth 配网</title>
   <style>
-    body { max-width: 32rem; margin: 3rem auto; padding: 0 1rem; font: 16px system-ui; background:#09111d; color:#eef6ff }
-    input,button { box-sizing:border-box; width:100%; padding:.8rem; margin:.35rem 0 1rem; font:inherit }
-    button { background:#23a8db; border:0; border-radius:.5rem; font-weight:700 }
-    #status { color:#ffd66b }
+    :root { font:16px/1.5 system-ui,sans-serif; color:#eef6ff; background:#09111d }
+    body { max-width:32rem; margin:0 auto; padding:2rem 1.1rem }
+    h1 { margin-bottom:.4rem }
+    .hint { color:#a9bbcc; margin-top:0 }
+    label { display:block; margin-top:1rem; font-weight:650 }
+    input,select,button { box-sizing:border-box; width:100%; padding:.85rem; margin-top:.35rem; font:inherit; border-radius:.55rem }
+    input,select { color:#eef6ff; background:#101f30; border:1px solid #38506a }
+    button { margin-top:1.4rem; color:#07131d; background:#52c7ef; border:0; font-weight:750; cursor:pointer }
+    button:disabled { cursor:wait; opacity:.55 }
+    [hidden] { display:none }
+    #status { min-height:3rem; margin-top:1.2rem; padding:.8rem; border-radius:.55rem; background:#101f30; color:#ffd66b }
+    #status.ok { color:#80e7a5 }
+    #status.error { color:#ff9d9d }
   </style>
 </head>
 <body>
-  <h1>EchoByte BLE 配网</h1>
-  <p>此页面需要通过 HTTPS 或 localhost 打开，并使用支持 Web Bluetooth 的浏览器。</p>
-  <label>Wi-Fi 名称 <input id="ssid" maxlength="32"></label>
-  <label>Wi-Fi 密码 <input id="password" type="password" maxlength="64"></label>
-  <button id="connect">连接设备并配网</button>
-  <div id="status"></div>
+  <h1>EchoByte 蓝牙配网</h1>
+  <p class="hint">保持手机连接正常网络，无需加入 Activate_CyberToy。网页从开发板读取附近热点，凭据只通过 BLE 发给开发板，不会上传到 HTTPS 服务。</p>
+
+  <button id="scan" type="button">连接 EchoByte 并扫描 Wi-Fi</button>
+
+  <form id="provision-form">
+    <label for="ssid-list">2.4 GHz Wi-Fi 名称（区分大小写）</label>
+    <select id="ssid-list" disabled required>
+      <option value="">请先连接 EchoByte 并扫描</option>
+    </select>
+
+    <div id="manual-fields" hidden>
+      <label for="manual-ssid">隐藏网络名称</label>
+      <input id="manual-ssid" maxlength="32" autocomplete="off" autocapitalize="none" spellcheck="false">
+    </div>
+
+    <label for="password">Wi-Fi 密码</label>
+    <input id="password" type="password" maxlength="64" autocomplete="off">
+
+    <button id="send" type="submit" disabled>发送凭据并连接</button>
+  </form>
+
+  <div id="status" role="status" aria-live="polite">正在检查浏览器能力…</div>
+
   <script>
+    'use strict';
+
     const SERVICE = '7b3e0001-6d6f-4d65-9f20-6563686f6279';
     const CREDENTIALS = '7b3e0002-6d6f-4d65-9f20-6563686f6279';
+    const INFO = '7b3e0003-6d6f-4d65-9f20-6563686f6279';
+    const NETWORKS = '7b3e0004-6d6f-4d65-9f20-6563686f6279';
+    const MANUAL = '__echo_byte_manual__';
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const form = document.querySelector('#provision-form');
+    const scanButton = document.querySelector('#scan');
+    const sendButton = document.querySelector('#send');
+    const ssidList = document.querySelector('#ssid-list');
+    const manualFields = document.querySelector('#manual-fields');
+    const manualSsid = document.querySelector('#manual-ssid');
+    const passwordInput = document.querySelector('#password');
     const status = document.querySelector('#status');
-    document.querySelector('#connect').addEventListener('click', async () => {
+    let credentialsCharacteristic = null;
+    let submissionFinished = false;
+
+    function report(message, kind = '') {
+      status.textContent = message;
+      status.className = kind;
+    }
+
+    function checkCapability() {
+      if (!window.isSecureContext) {
+        report('当前页面不是可信 HTTPS 安全上下文，浏览器已禁用 Web Bluetooth。', 'error');
+        scanButton.disabled = true;
+        return false;
+      }
+      if (!('bluetooth' in navigator)) {
+        report('此浏览器不支持 Web Bluetooth。Android 请使用 Chrome/Edge；iPhone Safari 请改用 AP 配网。', 'error');
+        scanButton.disabled = true;
+        return false;
+      }
+      report('准备就绪。请先连接 EchoByte，随后即可从热点列表选择 Wi-Fi。');
+      return true;
+    }
+
+    function validateCredentials(ssid, password) {
+      const ssidLength = encoder.encode(ssid).length;
+      const passwordLength = encoder.encode(password).length;
+      if (ssidLength === 0 || ssidLength > 32) {
+        throw new Error('Wi-Fi 名称必须为 1–32 个 UTF-8 字节');
+      }
+      if (passwordLength !== 0 && (passwordLength < 8 || passwordLength > 64)) {
+        throw new Error('密码必须为空（开放网络）或 8–64 个 UTF-8 字节');
+      }
+    }
+
+    async function writeGattValue(characteristic, value) {
+      if (typeof characteristic.writeValueWithResponse === 'function') {
+        await characteristic.writeValueWithResponse(value);
+      } else {
+        await characteristic.writeValue(value);
+      }
+    }
+
+    async function readNetworks(characteristic) {
+      const networks = [];
+      for (let index = 0; index < 255; index += 1) {
+        await writeGattValue(characteristic, new Uint8Array([index]));
+        const text = decoder.decode(await characteristic.readValue());
+        const network = JSON.parse(text);
+        if (network === null) break;
+        if (network && typeof network.ssid === 'string') networks.push(network);
+      }
+      return networks;
+    }
+
+    function showNetworks(networks) {
+      ssidList.replaceChildren();
+      for (const network of networks) {
+        const option = document.createElement('option');
+        option.value = network.ssid;
+        option.textContent = `${network.ssid}　${network.rssi} dBm　${network.secure ? '🔒' : '开放'}`;
+        ssidList.append(option);
+      }
+      const manual = document.createElement('option');
+      manual.value = MANUAL;
+      manual.textContent = '手动输入隐藏网络…';
+      ssidList.append(manual);
+      ssidList.value = networks.length ? networks[0].ssid : MANUAL;
+      ssidList.disabled = false;
+      manualFields.hidden = ssidList.value !== MANUAL;
+    }
+
+    ssidList.addEventListener('change', () => {
+      manualFields.hidden = ssidList.value !== MANUAL;
+      if (!manualFields.hidden) manualSsid.focus();
+    });
+
+    scanButton.addEventListener('click', async () => {
+      if (!checkCapability()) return;
+      scanButton.disabled = true;
+      sendButton.disabled = true;
+      credentialsCharacteristic = null;
+      submissionFinished = false;
+
       try {
-        status.textContent = '正在查找 EchoByte…';
+        report('正在扫描，请在系统列表中选择 EchoByte-Setup…');
         const device = await navigator.bluetooth.requestDevice({
-          filters: [{namePrefix:'EchoByte-Setup'}], optionalServices:[SERVICE]
+          filters: [{services: [SERVICE]}]
         });
+        device.addEventListener('gattserverdisconnected', () => {
+          credentialsCharacteristic = null;
+          sendButton.disabled = true;
+          scanButton.disabled = false;
+          if (!submissionFinished) report('蓝牙连接已断开，请重新连接。', 'error');
+        }, {once: true});
+
+        report(`正在连接 ${device.name || 'EchoByte'}…`);
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService(SERVICE);
-        const characteristic = await service.getCharacteristic(CREDENTIALS);
-        const payload = JSON.stringify({
-          ssid: document.querySelector('#ssid').value,
-          password: document.querySelector('#password').value
-        });
-        await characteristic.writeValueWithResponse(new TextEncoder().encode(payload));
-        status.textContent = '凭据已接收，设备将断开蓝牙并连接 Wi-Fi。';
+        const info = await service.getCharacteristic(INFO);
+        const descriptor = decoder.decode(await info.readValue());
+        if (!descriptor.includes('"version":2')) {
+          throw new Error('开发板固件不支持 BLE 热点列表，请更新固件');
+        }
+
+        report('正在从开发板读取附近的 2.4 GHz 热点…');
+        const networkList = await service.getCharacteristic(NETWORKS);
+        const networks = await readNetworks(networkList);
+        showNetworks(networks);
+        credentialsCharacteristic = await service.getCharacteristic(CREDENTIALS);
+        sendButton.disabled = false;
+        report(`已连接 EchoByte，发现 ${networks.length} 个热点。请选择后发送密码。`, 'ok');
       } catch (error) {
-        status.textContent = `配网失败：${error.message}`;
+        const message = error && error.message ? error.message : String(error);
+        report(`扫描失败：${message}`, 'error');
+        scanButton.disabled = false;
       }
     });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!credentialsCharacteristic) {
+        report('请先连接 EchoByte 并扫描热点。', 'error');
+        return;
+      }
+
+      const ssid = ssidList.value === MANUAL ? manualSsid.value : ssidList.value;
+      const password = passwordInput.value;
+      try {
+        validateCredentials(ssid, password);
+        sendButton.disabled = true;
+        const payload = encoder.encode(JSON.stringify({ssid, password}));
+        if (payload.length > 256) throw new Error('编码后的配网数据超过 256 字节');
+        report(`正在通过 BLE 发送 ${ssid} 的凭据…`);
+        await writeGattValue(credentialsCharacteristic, payload);
+        submissionFinished = true;
+        passwordInput.value = '';
+        report('设备已接收凭据并开始联网；验证成功后才会保存。', 'ok');
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        report(`发送失败：${message}`, 'error');
+        if (credentialsCharacteristic) sendButton.disabled = false;
+      }
+    });
+
+    checkCapability();
   </script>
 </body>
 </html>
