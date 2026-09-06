@@ -2,7 +2,7 @@
 
 ## 第一阶段：双轨自动配网（当前）
 
-- NVS 凭据读取、验证后提交和断线重连。
+- NVS 凭据读取、验证后提交、三次初连重试和断线重连。
 - BLE NimBLE GATT 配网与 AP Captive Portal 同时运行。
 - 通配 DNS、常见系统联网探测路径和 Wi-Fi 扫描页面。
 - 首个合法提交胜出；关闭 BLE、HTTP、DNS、AP 后切换纯 STA。

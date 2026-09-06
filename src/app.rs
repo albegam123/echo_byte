@@ -5,7 +5,7 @@ use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 
-use crate::config::{ONLINE_POLL_SECS, ONLINE_RECONNECT_ATTEMPTS};
+use crate::config::{ONLINE_POLL_SECS, ONLINE_RECONNECT_ATTEMPTS, STA_CONNECT_ATTEMPTS};
 use crate::provisioning::{self, Credentials};
 use crate::storage::CredentialStore;
 use crate::wifi::WifiManager;
@@ -34,7 +34,7 @@ pub async fn run() -> Result<()> {
             None => provisioning::obtain_credentials(&mut wifi).await?,
         };
 
-        match wifi.connect_sta(&credentials) {
+        match connect_with_retries(&mut wifi, &credentials) {
             Ok(()) => {
                 store.save(&credentials)?;
                 log::info!("credentials committed to NVS after successful DHCP");
@@ -53,6 +53,28 @@ pub async fn run() -> Result<()> {
             }
         }
     }
+}
+
+fn connect_with_retries(wifi: &mut WifiManager<'_>, credentials: &Credentials) -> Result<()> {
+    let mut last_error = None;
+
+    for attempt in 1..=STA_CONNECT_ATTEMPTS {
+        match wifi.connect_sta(credentials) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                log::warn!(
+                    "STA attempt {attempt}/{STA_CONNECT_ATTEMPTS} for SSID {:?} failed: {error:#}",
+                    credentials.ssid()
+                );
+                last_error = Some(error);
+                if attempt < STA_CONNECT_ATTEMPTS {
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+            }
+        }
+    }
+
+    Err(last_error.expect("STA_CONNECT_ATTEMPTS is non-zero"))
 }
 
 /// Returns true when reconnect attempts were exhausted and the caller should

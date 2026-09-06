@@ -12,7 +12,8 @@ ESP32-S3-N32R16 无屏智能语音终端。当前第一阶段实现 Wi-Fi 自动
    - `192.168.4.1` Captive Portal、通配 DNS；
    - BLE 外设 `EchoByte-Setup`。
 3. Portal 或 BLE 第一份通过格式校验的凭据获胜。设备关闭 BLE、DNS、HTTP 和 AP，再切换至纯 STA。
-4. 只有关联及 DHCP 成功后才写入 NVS。错误密码会让两种配网入口自动重启。
+4. 每份凭据会自动尝试三次，只有关联及 DHCP 成功后才写入 NVS；失败会记录
+   ESP-IDF 断开原因，并自动恢复两种配网入口。
 
 ## BLE 协议
 
@@ -47,3 +48,9 @@ Rust 原生构建器对自定义 CSV 相对路径的处理差异影响第一阶�
 ## 安全说明
 
 按产品规格，AP 是开放热点且 Portal 使用 HTTP，因此 Wi-Fi 密码在设备热点链路上没有应用层加密。量产前建议给 BLE 配网增加每台设备的 Proof-of-Possession，并重新评估开放 AP 要求。
+
+## 第三方补丁
+
+`vendor/esp32-nimble` 固定了 `esp32-nimble 0.12.0`，并修复 ESP-IDF 5.5
+下 `BLEDevice::deinit_full()` 在 NimBLE 已释放后访问 GAP 状态导致的崩溃。
+补丁原因与移除条件见 `vendor/esp32-nimble/PATCH.md`。

@@ -72,13 +72,6 @@ impl BleProvisioner {
 
 impl Drop for BleProvisioner {
     fn drop(&mut self) {
-        let device = BLEDevice::take();
-        let advertising = device.get_advertising();
-        if advertising.lock().is_advertising() {
-            if let Err(error) = advertising.lock().stop() {
-                log::warn!("failed to stop BLE advertising: {error:?}");
-            }
-        }
         if let Err(error) = BLEDevice::deinit_full() {
             log::warn!("failed to deinitialize NimBLE: {error}");
         } else {

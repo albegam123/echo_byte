@@ -18,6 +18,11 @@ serde_json = "1.0"
 [build-dependencies]
 embuild = "0.33"
 
+[patch.crates-io]
+# 0.12.0 calls ble_gap_adv_active() after nimble_port_deinit(), which crashes
+# ESP-IDF 5.5. Keep the small, documented fix local until upstream releases it.
+esp32-nimble = { path = "vendor/esp32-nimble" }
+
 [package.metadata.esp-idf-sys]
 esp_idf_components = [
     "main",
@@ -47,4 +52,7 @@ opt-level = "s"
 codegen-units = 1
 lto = "fat"
 opt-level = "s"
-strip = true
+# Keep symbols in the ELF while the provisioning lifecycle is under board
+# validation. espflash only writes loadable sections, so this does not enlarge
+# the flash image; switch back to `true` for production artifacts.
+strip = false

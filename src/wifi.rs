@@ -4,12 +4,13 @@ use anyhow::{anyhow, Context, Result};
 use embedded_svc::wifi::{
     AccessPointConfiguration, AuthMethod, ClientConfiguration, Configuration,
 };
-use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::eventloop::{EspSubscription, EspSystemEventLoop, System};
 use esp_idf_svc::hal::modem::Modem;
+use esp_idf_svc::handle::RawHandle;
 use esp_idf_svc::ipv4::{Configuration as IpConfiguration, Mask, RouterConfiguration, Subnet};
 use esp_idf_svc::netif::{EspNetif, NetifConfiguration, NetifStack};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-use esp_idf_svc::wifi::{BlockingWifi, EspWifi, WifiDriver};
+use esp_idf_svc::wifi::{BlockingWifi, EspWifi, WifiDriver, WifiEvent};
 use serde::Serialize;
 
 use crate::config::{AP_IP, AP_SSID};
@@ -25,6 +26,10 @@ pub struct ScannedNetwork {
 
 pub struct WifiManager<'d> {
     wifi: BlockingWifi<EspWifi<'d>>,
+    // Keep this subscription alive for the lifetime of the driver so failed
+    // WPA handshakes report an actionable ESP-IDF reason instead of a generic
+    // 15-second connection timeout.
+    _event_logger: EspSubscription<'static, System>,
 }
 
 impl<'d> WifiManager<'d> {
@@ -33,6 +38,16 @@ impl<'d> WifiManager<'d> {
         sys_loop: EspSystemEventLoop,
         nvs: EspDefaultNvsPartition,
     ) -> Result<Self> {
+        let event_logger = sys_loop.subscribe::<WifiEvent, _>(|event| match event {
+            WifiEvent::StaConnected(details) => {
+                log::info!("STA associated: {details:?}");
+            }
+            WifiEvent::StaDisconnected(details) => {
+                log::warn!("STA disconnected: {details:?}");
+            }
+            _ => {}
+        })?;
+
         let driver = WifiDriver::new(modem, sys_loop.clone(), Some(nvs))?;
         let sta_netif = EspNetif::new(NetifStack::Sta)?;
 
@@ -53,6 +68,7 @@ impl<'d> WifiManager<'d> {
         let wifi = EspWifi::wrap_all(driver, sta_netif, ap_netif)?;
         Ok(Self {
             wifi: BlockingWifi::wrap(wifi, sys_loop)?,
+            _event_logger: event_logger,
         })
     }
 
@@ -62,7 +78,10 @@ impl<'d> WifiManager<'d> {
         let auth_method = if credentials.password().is_empty() {
             AuthMethod::None
         } else {
-            AuthMethod::WPA2WPA3Personal
+            // ESP-IDF treats this field as the minimum accepted auth mode,
+            // not as an exact mode selection. WPA2 therefore accepts both
+            // ordinary WPA2-PSK and stronger WPA3/mixed-mode access points.
+            AuthMethod::WPA2Personal
         };
 
         let config = Configuration::Client(ClientConfiguration {
@@ -80,9 +99,19 @@ impl<'d> WifiManager<'d> {
 
         self.wifi.set_configuration(&config)?;
         self.wifi.start()?;
+        self.disable_power_save()?;
         log::info!("connecting to SSID {:?}", credentials.ssid());
 
-        if let Err(error) = self.wifi.connect().and_then(|_| self.wifi.wait_netif_up()) {
+        let connection_result = self.wifi.connect().and_then(|_| {
+            // The AP -> STA transition can leave lwIP's DHCP client in a
+            // stopped/old state on ESP-IDF 5.5. Restart it explicitly after
+            // association so a fresh DISCOVER is sent for every candidate.
+            self.wait_sta_netif_ready()?;
+            self.restart_sta_dhcp()?;
+            self.wifi.wait_netif_up()
+        });
+
+        if let Err(error) = connection_result {
             self.stop_best_effort();
             return Err(error).context("STA association/DHCP failed");
         }
@@ -165,6 +194,69 @@ impl<'d> WifiManager<'d> {
             self.wifi.stop()?;
         }
         Ok(())
+    }
+
+    fn restart_sta_dhcp(&self) -> core::result::Result<(), esp_idf_svc::sys::EspError> {
+        use esp_idf_svc::sys::{
+            esp_netif_dhcp_status_t, esp_netif_dhcp_status_t_ESP_NETIF_DHCP_STARTED,
+            esp_netif_dhcpc_get_status, esp_netif_dhcpc_start, esp_netif_dhcpc_stop, EspError,
+            ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED, ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED, ESP_OK,
+        };
+
+        let handle = self.wifi.wifi().sta_netif().handle();
+        let mut status: esp_netif_dhcp_status_t = 0;
+        EspError::check_and_return(
+            unsafe { esp_netif_dhcpc_get_status(handle, &mut status) },
+            (),
+        )?;
+        log::info!("STA DHCP client status before restart: {status}");
+
+        let stop_result = unsafe { esp_netif_dhcpc_stop(handle) };
+        if !matches!(stop_result, ESP_OK | ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+            return Err(EspError::from(stop_result).expect("non-zero DHCP stop error"));
+        }
+
+        let start_result = unsafe { esp_netif_dhcpc_start(handle) };
+        if !matches!(
+            start_result,
+            ESP_OK | ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED
+        ) {
+            return Err(EspError::from(start_result).expect("non-zero DHCP start error"));
+        }
+
+        let mut restarted_status: esp_netif_dhcp_status_t = 0;
+        EspError::check_and_return(
+            unsafe { esp_netif_dhcpc_get_status(handle, &mut restarted_status) },
+            (),
+        )?;
+        if restarted_status != esp_netif_dhcp_status_t_ESP_NETIF_DHCP_STARTED {
+            return Err(EspError::from_infallible::<
+                { esp_idf_svc::sys::ESP_ERR_INVALID_STATE },
+            >());
+        }
+        log::info!("STA DHCP client restarted");
+        Ok(())
+    }
+
+    fn disable_power_save(&self) -> core::result::Result<(), esp_idf_svc::sys::EspError> {
+        use esp_idf_svc::sys::{esp_wifi_set_ps, wifi_ps_type_t_WIFI_PS_NONE, EspError};
+
+        EspError::check_and_return(unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_NONE) }, ())?;
+        log::info!("STA modem-sleep disabled for reliable low-latency traffic");
+        Ok(())
+    }
+
+    fn wait_sta_netif_ready(&self) -> core::result::Result<(), esp_idf_svc::sys::EspError> {
+        for _ in 0..100 {
+            if self.wifi.wifi().sta_netif().is_netif_up()? {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        Err(esp_idf_svc::sys::EspError::from_infallible::<
+            { esp_idf_svc::sys::ESP_ERR_INVALID_STATE },
+        >())
     }
 
     fn stop_best_effort(&mut self) {
