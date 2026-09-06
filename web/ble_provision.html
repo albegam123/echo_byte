@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EchoByte BLE 配网</title>
+  <style>
+    body { max-width: 32rem; margin: 3rem auto; padding: 0 1rem; font: 16px system-ui; background:#09111d; color:#eef6ff }
+    input,button { box-sizing:border-box; width:100%; padding:.8rem; margin:.35rem 0 1rem; font:inherit }
+    button { background:#23a8db; border:0; border-radius:.5rem; font-weight:700 }
+    #status { color:#ffd66b }
+  </style>
+</head>
+<body>
+  <h1>EchoByte BLE 配网</h1>
+  <p>此页面需要通过 HTTPS 或 localhost 打开，并使用支持 Web Bluetooth 的浏览器。</p>
+  <label>Wi-Fi 名称 <input id="ssid" maxlength="32"></label>
+  <label>Wi-Fi 密码 <input id="password" type="password" maxlength="64"></label>
+  <button id="connect">连接设备并配网</button>
+  <div id="status"></div>
+  <script>
+    const SERVICE = '7b3e0001-6d6f-4d65-9f20-6563686f6279';
+    const CREDENTIALS = '7b3e0002-6d6f-4d65-9f20-6563686f6279';
+    const status = document.querySelector('#status');
+    document.querySelector('#connect').addEventListener('click', async () => {
+      try {
+        status.textContent = '正在查找 EchoByte…';
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [{namePrefix:'EchoByte-Setup'}], optionalServices:[SERVICE]
+        });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE);
+        const characteristic = await service.getCharacteristic(CREDENTIALS);
+        const payload = JSON.stringify({
+          ssid: document.querySelector('#ssid').value,
+          password: document.querySelector('#password').value
+        });
+        await characteristic.writeValueWithResponse(new TextEncoder().encode(payload));
+        status.textContent = '凭据已接收，设备将断开蓝牙并连接 Wi-Fi。';
+      } catch (error) {
+        status.textContent = `配网失败：${error.message}`;
+      }
+    });
+  </script>
+</body>
+</html>
