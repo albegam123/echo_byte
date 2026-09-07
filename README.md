@@ -1,7 +1,7 @@
 # echo_byte
 
 ESP32-S3-N32R16 无屏智能语音终端。第一阶段已实现 Wi-Fi 自动连接和
-BLE/AP 双轨配网；第二阶段正在接入完全开源的本地唤醒和语音前处理。
+BLE/AP 双轨配网；第二阶段已提供开源与 ESP-SR 两套可编译选择的本地唤醒和 3A。
 
 完整阶段安排见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 
@@ -55,9 +55,8 @@ python3 scripts/serve_ble_https.py
 ```bash
 source ~/export-esp.sh
 cargo install ldproxy espflash --locked
-cargo +esp build --release
-espflash flash --monitor --port /dev/ttyACM0 \
-  target/xtensa-esp32s3-espidf/release/echo_byte
+scripts/build_audio_backend.sh open
+scripts/flash_audio_backend.sh open /dev/ttyACM0
 ```
 
 本机用户需要拥有串口权限（通常加入 `dialout` 组）。
@@ -67,11 +66,16 @@ sudo usermod -aG dialout "$USER"
 # 注销并重新登录后生效
 ```
 
-当前配网固件使用 ESP-IDF 的 large single-app 分区表。仓库内的 `partitions.csv`
-预留了第二阶段需要的 OTA、WakeNet 模型和数据区域，接入模型时再启用，避免当前
-Rust 原生构建器对自定义 CSV 相对路径的处理差异影响第一阶段烧录。
+当前启用 32 MB 自定义分区表，保留 factory、两个 6 MB OTA slot、8 MB ESP-SR
+模型区和数据区。ESP-SR 后端还需单独烧录构建生成的模型镜像，完整命令见
+[`docs/AUDIO_BACKENDS.md`](docs/AUDIO_BACKENDS.md)。
 
-## 开源语音前端
+## 可选择的语音前端
+
+默认后端是完全开源的 SpeexDSP + microWakeWord；也可在编译期选择乐鑫 ESP-SR
+2.5.3 AFE + WakeNet10。两者共享 `AudioFrontend`、PCM 和统计契约，feature 互斥，
+用于后续同板性能与效果评估。构建、烧录、帧长/双声道差异及许可证边界见
+[`docs/AUDIO_BACKENDS.md`](docs/AUDIO_BACKENDS.md)。
 
 - 3A 使用 Xiph SpeexDSP 的 BSD-3-Clause 官方源码固定快照：16 kHz、10 ms、
   单麦克风、双声道扬声器参考，包含 AEC、NS、AGC 和 VAD。浮点构建是刻意选择，

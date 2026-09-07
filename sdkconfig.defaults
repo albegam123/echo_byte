@@ -41,8 +41,17 @@ CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
 
-# Stage one uses ESP-IDF's large single-app table. `partitions.csv` documents
-# the OTA/model layout reserved for the later audio phase; it is activated once
-# the model partition is actually consumed.
-CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+# Shared OTA layout. The ESP-SR build places its selected WakeNet data in the
+# `model` partition; the open backend leaves that partition unused.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+# esp-idf-sys builds its generated ESP-IDF project at
+# target/<triple>/<profile>/build/<hash>/out, six levels below this file.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../../../../partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# ESP-SR 2.5.3 model selection. The model image is generated in both builds;
+# only the audio-esp-sr Rust feature initializes and links the backend.
+CONFIG_MODEL_IN_FLASH=y
+CONFIG_SR_NSN_WEBRTC=y
+CONFIG_SR_VADN_WEBRTC=y
+CONFIG_SR_WN_WN10_NIHAOXIAOZHI=y

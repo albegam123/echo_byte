@@ -12,12 +12,16 @@
 - 首个合法提交胜出；关闭 BLE、HTTP、DNS、AP 后切换纯 STA。
 - 板端验收：Android/iOS/Windows Portal、WebBLE、错误密码恢复、断电重连。
 
-## 第二阶段：开源唤醒与语音算法（进行中）
+## 第二阶段：双音频后端与离线唤醒（进行中）
 
 - Xiph SpeexDSP AEC/NS/AGC/VAD 以窄 C ABI 接入 Rust；固定 16 kHz、10 ms 帧。
 - AEC 输入为一声道麦克风和交错双声道播放参考，输出仍为一声道。
 - microWakeWord v2 + TFLite Micro/ESP-NN + micro-speech frontend。
 - `Hey Jarvis` 用于首次板测，后续训练并替换成 `EchoByte` 专用模型。
+- ESP-SR 2.5.3 AFE（AEC/NS/AGC/VAD）+ WakeNet10 `你好小智` 通过窄 C ABI 接入。
+- `audio-open` / `audio-esp-sr` 互斥 feature，共享 `AudioFrontend`、PCM 和性能统计契约。
+- ESP-SR 原生 32 ms 帧及单 playback reference 与开源 10 ms/双 reference 的差异
+  在评测报告中单列。
 - GPIO0 BOOT 键和模型检测统一输出 `WakeEvent`；RST/EN 键只负责硬复位。
 - 无音频器件时先运行零输入自检；器件到位后记录每帧耗时、内部 SRAM、PSRAM、
   误唤醒和漏唤醒数据。

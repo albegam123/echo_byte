@@ -15,7 +15,7 @@ use crate::wifi::{ScannedNetwork, WifiManager};
 
 pub async fn run() -> Result<()> {
     if let Err(error) = crate::audio::run_startup_self_test() {
-        log::error!("open audio stack startup self-test failed: {error:#}");
+        log::error!("selected audio backend startup self-test failed: {error:#}");
     }
 
     let peripherals = Peripherals::take().context("take ESP32-S3 peripherals")?;

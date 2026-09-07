@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 resolver = "2"
 
+[features]
+default = ["audio-open"]
+audio-open = []
+audio-esp-sr = []
+
 [dependencies]
 anyhow = "1.0"
 async-channel = "2.5"
@@ -40,9 +45,11 @@ esp_idf_components = [
     "driver",
     "echo_audio_dsp",
     "echo_wakeword",
+    "echo_audio_backend",
     "espressif__esp-tflite-micro",
     "espressif__esp-nn",
     "esphome__esp-micro-speech-features",
+    "espressif__esp-sr",
     # esp-idf-svc 0.52's std IO module currently expects these bindings.
     "spiffs",
     "fatfs",
@@ -60,6 +67,11 @@ bindings_header = "components/echo_wakeword/include/echo_wakeword.h"
 bindings_module = "echo_wakeword"
 
 [[package.metadata.esp-idf-sys.extra_components]]
+component_dirs = ["backends/audio-esp-sr/components/echo_audio_backend"]
+bindings_header = "backends/audio-esp-sr/components/echo_audio_backend/include/echo_esp_sr.h"
+bindings_module = "echo_esp_sr"
+
+[[package.metadata.esp-idf-sys.extra_components]]
 remote_component = { name = "espressif/esp-tflite-micro", version = "=1.3.7" }
 
 [[package.metadata.esp-idf-sys.extra_components]]
@@ -67,6 +79,9 @@ remote_component = { name = "espressif/esp-nn", version = "=1.1.2" }
 
 [[package.metadata.esp-idf-sys.extra_components]]
 remote_component = { name = "esphome/esp-micro-speech-features", version = "=1.2.3" }
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp-sr", version = "=2.5.3" }
 
 [profile.dev]
 debug = true

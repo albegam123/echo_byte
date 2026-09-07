@@ -1,3 +1,9 @@
+#[cfg(all(feature = "audio-open", feature = "audio-esp-sr"))]
+compile_error!("select exactly one audio backend: audio-open or audio-esp-sr");
+
+#[cfg(not(any(feature = "audio-open", feature = "audio-esp-sr")))]
+compile_error!("select exactly one audio backend: audio-open or audio-esp-sr");
+
 mod app;
 mod audio;
 mod config;
